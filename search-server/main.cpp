@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -10,8 +9,20 @@
 #include <cstdlib>
 #include <iomanip>
 #include <numeric>
+#include <stdexcept>
 
 using namespace std;
+
+/*
+Привет!
+У меня вызывает сомнения реализация и использование двух приватных методов: IsValidWord и IsValidQuery.
+Возможно, их стоит использовать внутри других методов (например, в ParseQuery и ParseQueryWord).
+Но, AddDocument не импользует эти методы, и получается, что там надо явно прописать эту проверку на валидность.
+Поэтому, чтобы наличие этой проверки на валидность было очевидно и в других методах, я не стал её прятать.
+Наверняка можно сделать лучше — как?
+
+Ну, оно хотя бы работает! :)
+*/
 
 //Количество топ-документов
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
@@ -55,9 +66,17 @@ vector<string> SplitIntoWords(const string& text) {
 
 //Храним документ
 struct Document {
-    int id;
-    double relevance;
-    int rating;
+    Document() = default;
+
+    Document(int id, double relevance, int rating)
+        : id(id)
+        , relevance(relevance)
+        , rating(rating) {
+    }
+
+    int id = 0;
+    double relevance = 0.0;
+    int rating = 0;
 };
 
 //Статусы документа
@@ -68,18 +87,50 @@ enum class DocumentStatus {
     REMOVED,
 };
 
+template <typename StringContainer>
+set<string> MakeUniqueNonEmptyStrings(const StringContainer& strings) {
+    set<string> non_empty_strings;
+    for (const string& str : strings) {
+        if (!str.empty()) {
+            non_empty_strings.insert(str);
+        }
+    }
+    return non_empty_strings;
+}
+
 class SearchServer {
 public:
-    //Формируем множество стоп-слов из строки
-    void SetStopWords(const string& text) {
-        for (const string& word : SplitIntoWords(text)) {
-            stop_words_.insert(word);
+    inline static constexpr int INVALID_DOCUMENT_ID = -1;
+
+    //Формируем множество стоп-слов из строки, конструкторы:
+    template <typename StringContainer>
+    explicit SearchServer(const StringContainer& stop_words)
+        : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
+        for (const auto& word : stop_words_) {
+            if (!IsValidWord(word)) {
+                throw invalid_argument("One of stop-words contains special characters!");
+            }
+        }
+    }
+    explicit SearchServer(const string& stop_words_text)
+        : SearchServer(SplitIntoWords(stop_words_text)) {
+        for (const auto& word : stop_words_) {
+            if (!IsValidWord(word)) {
+                throw invalid_argument("One of stop-words contains special characters!");
+            }
         }
     }
 
-    //Добавляем документ
+
+    //Добавляем документ и выбрасываем исключение, если документ невалидный(см.ниже в private),
+    //его id отрицательный или повторяется в базе
     void AddDocument(int id_document, const string& document, DocumentStatus status,
         const vector<int>& ratings) {
+        if (!IsValidWord(document)
+            || (id_document < 0)
+            || (documents_.count(id_document) > 0)) {
+            throw invalid_argument("Something wrong with adding document!"s);
+        }
         const vector<string> words = SplitIntoWordsNoStop(document);
         //Добавляем документ и вычисляем TF конкретного слова в нём
         const double tf = 1.0 / static_cast<double>(words.size());
@@ -87,11 +138,16 @@ public:
             word_to_document_freqs_[word][id_document] += tf;
         }
         documents_.emplace(id_document, DocumentData{ ComputeAverageRating(ratings), status });
+        index_id_.push_back(id_document);
     }
 
     //Выбираем ТОП-документы (с дополнительными критериями сортировки)
     template <typename Predicate>
     vector<Document> FindTopDocuments(const string& raw_query, Predicate predicate) const {
+        //Если поисковый запрос невалидный, будем выбрасывать исключение
+        if (!IsValidQuery(raw_query) || !IsValidWord(raw_query)) {
+            throw invalid_argument("Wrong query"s);
+        }
         const Query query = ParseQuery(raw_query);
         auto matched_documents = FindAllDocuments(query, predicate);
         //Сортировка по невозрастанию ...
@@ -125,14 +181,13 @@ public:
         return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
     }
 
-    //Узнаём сколько у нас документов
-    int GetDocumentCount() const {
-        return documents_.size();
-    }
-
     //Матчинг документов - возвращаем все слова из поискового запроса, присутствующие в документе
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query,
         int document_id) const {
+        //Если поисковый запрос невалидный, будем выбрасывать исключение
+        if (!IsValidQuery(raw_query) || !IsValidWord(raw_query)) {
+            throw invalid_argument("Wrong query"s);
+        }
         const Query query = ParseQuery(raw_query);
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
@@ -153,6 +208,25 @@ public:
             }
         }
         return { matched_words, documents_.at(document_id).document_status };
+    }
+
+    //Узнаём сколько у нас документов
+    int GetDocumentCount() const {
+        return documents_.size();
+    }
+
+    //Узнаём id документа по порядку его добавления
+    //(будем считать, что пользователь знает, что нумерация начинается с 0)
+    int GetDocumentId(int index) const {
+        return index_id_.at(index);
+        /*
+        if (index < 0 || GetDocumentCount() < index) {
+            throw out_of_range("Index is out of range"s);
+        }
+        else {
+            return index_id_[index];
+        }
+        */
     }
 
 private:
@@ -182,6 +256,34 @@ private:
 
     //Храним документы <слово(ключ) <id(ключ) , TF>>
     map<string, map<int, double>> word_to_document_freqs_;
+
+    //Храним id документов в порядке их добавления в базу
+    vector<int> index_id_;
+
+    //Проверка на спец-символы
+    static bool IsValidWord(const string& word) {
+        //Валидным считаем то слово, которое не содержит спец-символы
+        return none_of(word.begin(), word.end(), [](char c) {
+            return c >= '\0' && c < ' ';
+            });
+    }
+
+    //Проверка на соответствие нашему условному синтаксису
+    static bool IsValidQuery(const string& raw_query) {
+        //если в самом конце строки стоит -, то это нам не подходит
+        if (raw_query[static_cast<int>(raw_query.size()) - 1] == '-') {
+            return false;
+        }
+        //нам не подойдут поисковые запросы где подряд идут --
+        //и где в строке стоит -, а после него пробел
+        for (int i = 0; i < (static_cast<int>(raw_query.size()) - 1); ++i) {
+            if ((raw_query[i] == '-' && raw_query[i + 1] == '-') ||
+                (raw_query[i] == '-' && raw_query[i + 1] == ' ')) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     //Проверка - "это стоп-слово?"
     bool IsStopWord(const string& word) const {
@@ -287,6 +389,7 @@ private:
     }
 };
 
+/*
 //Реализация макросов для тестов
 template <typename T, typename U>
 void AssertEqualImpl(const T& t, const U& u, const string& t_str, const string& u_str, const string& file,
@@ -657,4 +760,54 @@ int main() {
     TestSearchServer();
     // Если вы видите эту строку, значит все тесты прошли успешно
     cout << "Search server testing finished"s << endl;
+}
+*/
+
+int main() {
+
+    try {
+        //SearchServer search_server("и в на"s);
+        SearchServer search_server("и в н%а"s);
+
+    } catch (const invalid_argument& i_a) {
+        cout << "Error: "s << i_a.what() << endl;
+    }
+
+    try {
+    search_server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
+    search_server.AddDocument(1, "пушистый пёс и модный ошейник"s, DocumentStatus::ACTUAL, { 1, 2 });
+
+    }
+    catch (const invalid_argument& i_a) {
+        cout << "Error: "s << i_a.what() << endl;
+        cout << "Документ не был добавлен, так как его id совпадает с уже имеющимся"s << endl;
+    }
+
+    try {
+        search_server.AddDocument(-1, "пушистый пёс и модный ошейник"s, DocumentStatus::ACTUAL, { 1, 2 });
+    
+    } catch (const invalid_argument& i_a) {
+        cout << "Error: "s << i_a.what() << endl;
+        cout << "Документ не был добавлен, так как его id отрицательный"s << endl;
+    }
+
+    try {
+        search_server.AddDocument(3, "большой пёс скво\x12рец"s, DocumentStatus::ACTUAL, { 1, 3, 2 });
+    
+    }
+    } catch (const invalid_argument& i_a) {
+        cout << "Error: "s << i_a.what() << endl;
+        cout << "Документ не был добавлен, так как содержит спецсимволы"s << endl;
+    }
+
+    try {
+        search_server.FindTopDocuments("--пушистый"s));
+        for (const Document& document : documents) {
+            PrintDocument(document);
+        }
+
+    } catch (const invalid_argument& i_a) {
+        cout << "Error: "s << i_a.what() << endl;
+        cout << "Ошибка в поисковом запросе"s << endl;
+    }
 }
