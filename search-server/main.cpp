@@ -13,17 +13,6 @@
 
 using namespace std;
 
-/*
-Привет!
-У меня вызывает сомнения реализация и использование двух приватных методов: IsValidWord и IsValidQuery.
-Возможно, их стоит использовать внутри других методов (например, в ParseQuery и ParseQueryWord).
-Но, AddDocument не импользует эти методы, и получается, что там надо явно прописать эту проверку на валидность.
-Поэтому, чтобы наличие этой проверки на валидность было очевидно и в других методах, я не стал её прятать.
-Наверняка можно сделать лучше — как?
-
-Ну, оно хотя бы работает! :)
-*/
-
 //Количество топ-документов
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
 //Допустимая погрешнось по релевантности
@@ -49,6 +38,11 @@ vector<string> SplitIntoWords(const string& text) {
     for (const char c : text) {
         if (c == ' ') {
             if (!word.empty()) {
+                //Это одинокий минус? Нам такое не надо.
+                if (word.size() == 1 && word[0] == '-') {
+                    throw invalid_argument("This word contains only \'-\' and nothing else"s);
+                }
+                //Всё ОК, это просто слово, давайте добавим его.
                 words.push_back(word);
                 word.clear();
             }
@@ -100,37 +94,29 @@ set<string> MakeUniqueNonEmptyStrings(const StringContainer& strings) {
 
 class SearchServer {
 public:
-    inline static constexpr int INVALID_DOCUMENT_ID = -1;
-
-    //Формируем множество стоп-слов из строки, конструкторы:
+    //Формируем множество стоп-слов из строки — конструкторы:
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
-        for (const auto& word : stop_words_) {
-            if (!IsValidWord(word)) {
-                throw invalid_argument("One of stop-words contains special characters!");
-            }
+        
+        if (any_of(stop_words.begin(), stop_words.end(),
+            [](const auto& stop_word) { return !IsValidWord(stop_word); } )) {
+            throw invalid_argument("One of stop-words contains special characters!"s);
         }
     }
     explicit SearchServer(const string& stop_words_text)
         : SearchServer(SplitIntoWords(stop_words_text)) {
-        for (const auto& word : stop_words_) {
-            if (!IsValidWord(word)) {
-                throw invalid_argument("One of stop-words contains special characters!");
-            }
-        }
     }
-
 
     //Добавляем документ и выбрасываем исключение, если документ невалидный(см.ниже в private),
     //его id отрицательный или повторяется в базе
     void AddDocument(int id_document, const string& document, DocumentStatus status,
         const vector<int>& ratings) {
-        if (!IsValidWord(document)
-            || (id_document < 0)
-            || (documents_.count(id_document) > 0)) {
-            throw invalid_argument("Something wrong with adding document!"s);
+        //Теперь при добавлении документа явно проверяем только коректность его ID
+        if (id_document < 0 || documents_.count(id_document) > 0) {
+            throw invalid_argument("Something wrong with ID!"s);
         }
+        //Теперь проверка валидности каждого слова добавлена в SplitIntoWordsNoStop  
         const vector<string> words = SplitIntoWordsNoStop(document);
         //Добавляем документ и вычисляем TF конкретного слова в нём
         const double tf = 1.0 / static_cast<double>(words.size());
@@ -144,10 +130,7 @@ public:
     //Выбираем ТОП-документы (с дополнительными критериями сортировки)
     template <typename Predicate>
     vector<Document> FindTopDocuments(const string& raw_query, Predicate predicate) const {
-        //Если поисковый запрос невалидный, будем выбрасывать исключение
-        if (!IsValidQuery(raw_query) || !IsValidWord(raw_query)) {
-            throw invalid_argument("Wrong query"s);
-        }
+        //Теперь валидность поискового запроса проверяется внутри ParseQuery (ParseQueryWord)
         const Query query = ParseQuery(raw_query);
         auto matched_documents = FindAllDocuments(query, predicate);
         //Сортировка по невозрастанию ...
@@ -184,10 +167,7 @@ public:
     //Матчинг документов - возвращаем все слова из поискового запроса, присутствующие в документе
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query,
         int document_id) const {
-        //Если поисковый запрос невалидный, будем выбрасывать исключение
-        if (!IsValidQuery(raw_query) || !IsValidWord(raw_query)) {
-            throw invalid_argument("Wrong query"s);
-        }
+        //Теперь валидность поискового запроса проверяется внутри ParseQuery (ParseQueryWord)
         const Query query = ParseQuery(raw_query);
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
@@ -219,14 +199,6 @@ public:
     //(будем считать, что пользователь знает, что нумерация начинается с 0)
     int GetDocumentId(int index) const {
         return index_id_.at(index);
-        /*
-        if (index < 0 || GetDocumentCount() < index) {
-            throw out_of_range("Index is out of range"s);
-        }
-        else {
-            return index_id_[index];
-        }
-        */
     }
 
 private:
@@ -260,6 +232,11 @@ private:
     //Храним id документов в порядке их добавления в базу
     vector<int> index_id_;
 
+    //Проверка - "это стоп-слово?"
+    bool IsStopWord(const string& word) const {
+        return stop_words_.count(word) > 0;
+    }
+
     //Проверка на спец-символы
     static bool IsValidWord(const string& word) {
         //Валидным считаем то слово, которое не содержит спец-символы
@@ -268,32 +245,13 @@ private:
             });
     }
 
-    //Проверка на соответствие нашему условному синтаксису
-    static bool IsValidQuery(const string& raw_query) {
-        //если в самом конце строки стоит -, то это нам не подходит
-        if (raw_query[static_cast<int>(raw_query.size()) - 1] == '-') {
-            return false;
-        }
-        //нам не подойдут поисковые запросы где подряд идут --
-        //и где в строке стоит -, а после него пробел
-        for (int i = 0; i < (static_cast<int>(raw_query.size()) - 1); ++i) {
-            if ((raw_query[i] == '-' && raw_query[i + 1] == '-') ||
-                (raw_query[i] == '-' && raw_query[i + 1] == ' ')) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    //Проверка - "это стоп-слово?"
-    bool IsStopWord(const string& word) const {
-        return stop_words_.count(word) > 0;
-    }
-
     //Формируем вектор из строки с пробелами и вычёркиваем стоп-слова
     vector<string> SplitIntoWordsNoStop(const string& text) const {
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
+            if (!IsValidWord) {
+                throw invalid_argument("Invalis word(s) in the adding doccument!"s);
+            }
             if (!IsStopWord(word)) {
                 words.push_back(word);
             }
@@ -312,10 +270,19 @@ private:
 
     //Парсинг слова строки запроса
     QueryWord ParseQueryWord(string word) const {
+        //Это вообще валидное слово?
+        if (!IsValidWord) {
+            throw invalid_argument("You word has a special character!"s);
+        }
         bool is_minus = false;
         //Это минус-слово?
         if (word[0] == '-') {
-            //Да! Теперь уберём "-" впереди.
+            //Это слово с префиксом из двух минусов?
+            if (word[1] == '-') {
+                //Нам такое не подходит!
+                throw invalid_argument("Trying to set minus-minus word!"s);
+            }
+            //Это просто минус-слово! Теперь уберём "-" впереди.
             is_minus = true;
             word = word.substr(1);
         }
