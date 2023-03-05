@@ -31,6 +31,13 @@ int ReadLineWithNumber() {
     return result;
 }
 
+//Выбрасываем исключение, если находим одинокий минус (' - ')
+void LonelyMinusTerminator(const string& word) {
+    if (word.size() == 1 && word[0] == '-') {
+        throw invalid_argument("This word contains only \'-\' and nothing else"s);
+    }
+}
+
 //Формируем вектор из строки с пробелами
 vector<string> SplitIntoWords(const string& text) {
     vector<string> words;
@@ -38,10 +45,7 @@ vector<string> SplitIntoWords(const string& text) {
     for (const char c : text) {
         if (c == ' ') {
             if (!word.empty()) {
-                //Это одинокий минус? Нам такое не надо.
-                if (word.size() == 1 && word[0] == '-') {
-                    throw invalid_argument("This word contains only \'-\' and nothing else"s);
-                }
+                LonelyMinusTerminator(word);
                 //Всё ОК, это просто слово, давайте добавим его.
                 words.push_back(word);
                 word.clear();
@@ -52,9 +56,9 @@ vector<string> SplitIntoWords(const string& text) {
         }
     }
     if (!word.empty()) {
+        LonelyMinusTerminator(word);
         words.push_back(word);
     }
-
     return words;
 }
 
@@ -249,8 +253,8 @@ private:
     vector<string> SplitIntoWordsNoStop(const string& text) const {
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
-            if (!IsValidWord) {
-                throw invalid_argument("Invalis word(s) in the adding doccument!"s);
+            if (!IsValidWord(word)) {
+                throw invalid_argument("Invalid word(s) in the adding doccument!"s);
             }
             if (!IsStopWord(word)) {
                 words.push_back(word);
@@ -271,13 +275,16 @@ private:
     //Парсинг слова строки запроса
     QueryWord ParseQueryWord(string word) const {
         //Это вообще валидное слово?
-        if (!IsValidWord) {
-            throw invalid_argument("You word has a special character!"s);
+        if (!IsValidWord(word)) {
+            throw invalid_argument("Your word has a special character!"s);
         }
         bool is_minus = false;
         //Это минус-слово?
         if (word[0] == '-') {
             //Это слово с префиксом из двух минусов?
+            //ParseQueryWord будет вызван в ParseQuery после применения SplitIntoWords, который убирает одинокие минусы
+            //т.е. в ParseQueryWord никак не прилетит этот самый одинокий минус
+            //или тут какой-то другой смысл?
             if (word[1] == '-') {
                 //Нам такое не подходит!
                 throw invalid_argument("Trying to set minus-minus word!"s);
