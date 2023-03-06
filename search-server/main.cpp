@@ -278,13 +278,22 @@ private:
         if (!IsValidWord(word)) {
             throw invalid_argument("Your word has a special character!"s);
         }
+        //Дополнительная проверка на отсутствие одинокого минуса
+        LonelyMinusTerminator(word);
+        
         bool is_minus = false;
         //Это минус-слово?
         if (word[0] == '-') {
+                        
+            /*
+            ParseQueryWord будет вызван в ParseQuery после применения SplitIntoWords, который убирает одинокие минусы,
+            т.е. в SplitIntoWords у нас как раз применяется LonelyMinusTerminator.
+            При таком подходе в ParseQueryWord не попадёт одинокий минус: если минус вообще встретится, то он будет
+            либо относится к ожидаемому минус-слову, либо это будет минус-минус-слово, которое мы и пытаемся поймать.
+            Наличие LonelyMinusTerminator в SplitIntoWords уже гарантирует, что нам не попадётся здесь одинокий минус.
+            */
+
             //Это слово с префиксом из двух минусов?
-            //ParseQueryWord будет вызван в ParseQuery после применения SplitIntoWords, который убирает одинокие минусы
-            //т.е. в ParseQueryWord никак не прилетит этот самый одинокий минус
-            //или тут какой-то другой смысл?
             if (word[1] == '-') {
                 //Нам такое не подходит!
                 throw invalid_argument("Trying to set minus-minus word!"s);
@@ -737,19 +746,28 @@ int main() {
 }
 */
 
+void PrintDocument(const Document& document) {
+    cout << "{ "s
+        << "document_id = "s << document.id << ", "s
+        << "relevance = "s << document.relevance << ", "s
+        << "rating = "s << document.rating << " }"s << endl;
+}
+
 int main() {
 
     try {
         //SearchServer search_server("и в на"s);
         SearchServer search_server("и в н%а"s);
 
-    } catch (const invalid_argument& i_a) {
+    }
+    catch (const invalid_argument& i_a) {
         cout << "Error: "s << i_a.what() << endl;
     }
 
     try {
-    search_server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
-    search_server.AddDocument(1, "пушистый пёс и модный ошейник"s, DocumentStatus::ACTUAL, { 1, 2 });
+        SearchServer search_server("и в на"s);
+        search_server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
+        search_server.AddDocument(1, "пушистый пёс и модный ошейник"s, DocumentStatus::ACTUAL, { 1, 2 });
 
     }
     catch (const invalid_argument& i_a) {
@@ -758,30 +776,36 @@ int main() {
     }
 
     try {
+        SearchServer search_server("и в на"s);
         search_server.AddDocument(-1, "пушистый пёс и модный ошейник"s, DocumentStatus::ACTUAL, { 1, 2 });
-    
-    } catch (const invalid_argument& i_a) {
+
+    }
+    catch (const invalid_argument& i_a) {
         cout << "Error: "s << i_a.what() << endl;
         cout << "Документ не был добавлен, так как его id отрицательный"s << endl;
     }
 
     try {
+        SearchServer search_server("и в на"s);
         search_server.AddDocument(3, "большой пёс скво\x12рец"s, DocumentStatus::ACTUAL, { 1, 3, 2 });
-    
+
     }
-    } catch (const invalid_argument& i_a) {
+    catch (const invalid_argument& i_a) {
         cout << "Error: "s << i_a.what() << endl;
         cout << "Документ не был добавлен, так как содержит спецсимволы"s << endl;
     }
 
     try {
-        search_server.FindTopDocuments("--пушистый"s));
+        SearchServer search_server("и в на"s);
+        const auto documents = search_server.FindTopDocuments("--пушистый"s);
         for (const Document& document : documents) {
             PrintDocument(document);
         }
 
-    } catch (const invalid_argument& i_a) {
+    }
+    catch (const invalid_argument& i_a) {
         cout << "Error: "s << i_a.what() << endl;
         cout << "Ошибка в поисковом запросе"s << endl;
     }
+    return 0;
 }
