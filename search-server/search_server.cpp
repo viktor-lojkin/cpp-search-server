@@ -23,9 +23,10 @@ void SearchServer::AddDocument(int id_document, const std::string& document, Doc
     const double tf = 1.0 / static_cast<double>(words.size());
     for (const std::string& word : words) {
         word_to_document_freqs_[word][id_document] += tf;
+        document_to_word_freqs_[id_document][word] += tf;
     }
     documents_.emplace(id_document, DocumentData{ ComputeAverageRating(ratings), status });
-    index_id_.push_back(id_document);
+    ids_.insert(id_document);
 }
 
 // Выбираем ТОП-документы (с дополнительными критериями сортировки)
@@ -75,10 +76,40 @@ int SearchServer::GetDocumentCount() const {
     return documents_.size();
 }
 
-// Узнаём id документа по порядку его добавления
-// (будем считать, что пользователь знает, что нумерация начинается с 0)
-int SearchServer::GetDocumentId(int index) const {
-    return index_id_.at(index);
+// 
+SearchServer::id_const_iterator SearchServer::begin() {
+    return ids_.begin();
+}
+SearchServer::id_const_iterator SearchServer::end() {
+    return ids_.end();
+}
+
+const std::map<std::string, double>& SearchServer::GetWordFrequencies(int document_id) const {
+    static const std::map<std::string, double> empty_map{};
+    if (document_to_word_freqs_.empty()) {
+        return empty_map;
+    } else {
+        return document_to_word_freqs_.at(document_id);
+    }
+}
+
+void SearchServer::RemoveDocument(int document_id) {
+    if (!documents_.count(document_id)) {
+        return;
+    }
+
+    documents_.erase(document_id);
+    document_to_word_freqs_.erase(document_id);
+    ids_.erase(document_id);
+
+    for (auto& [word, id] : word_to_document_freqs_) {
+        if (word_to_document_freqs_.at(word).count(document_id)) {
+            word_to_document_freqs_.at(word).erase(document_id);
+        }
+        else {
+            continue;
+        }
+    }
 }
 
 // Проверка - "это стоп-слово?"

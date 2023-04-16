@@ -5,6 +5,7 @@
 #include <utility>
 #include <map>
 #include <set>
+#include <tuple>
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -44,7 +45,18 @@ public:
 
     //Узнаём количество и id документа
     int GetDocumentCount() const;
-    int GetDocumentId(int index) const;
+
+    //Вместо GetDocumentId
+    typedef typename std::set<int>::const_iterator id_const_iterator;
+    id_const_iterator begin();
+    id_const_iterator end();
+
+    //Получаем частоту слов в нужном документе
+    const std::map<std::string, double>& GetWordFrequencies(int document_id) const;
+
+    //Удаляем документ
+    void RemoveDocument(int document_id);
+
 
 private:
 
@@ -72,11 +84,13 @@ private:
         std::string word;
     };
 
-    //Храним документы <слово(ключ) <id(ключ) , TF>>
+    //Храним документы < слово(ключ) <id(ключ), TF> >
     std::map<std::string, std::map<int, double>> word_to_document_freqs_;
+    //      < id(ключ)    <  слово(ключ), TF  >>
+    std::map<int, std::map<std::string, double>> document_to_word_freqs_;
 
     //Храним id документов в порядке их добавления в базу
-    std::vector<int> index_id_;
+    std::set<int> ids_;
 
     //Проверки
     bool IsStopWord(const std::string& word) const;
@@ -95,7 +109,7 @@ private:
     //Парсинг строки запроса
     Query ParseQuery(const std::string& text) const;
 
-    //Вычилсить IDF конкретного слова из запроса
+    //Вычисляем IDF конкретного слова из запроса
     double CalculateIDF(const std::string& plus_word) const;
 
     //Найти все документы, подходящие под запрос

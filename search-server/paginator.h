@@ -3,8 +3,6 @@
 #include <iostream>
 #include <vector>
 
-#include "document.h"
-
 
 template <typename Iterator>
 class IteratorRange {
@@ -69,13 +67,6 @@ private:
 template <typename Container>
 auto Paginate(const Container& c, size_t page_size) {
     return Paginator(begin(c), end(c), page_size);
-}
-
-
-std::ostream& operator<<(std::ostream& out, Document document) {
-    return out << "{ document_id = "s << document.id <<
-        ", relevance = "s << document.relevance <<
-        ", rating = "s << document.rating << " }"s;
 }
 
 

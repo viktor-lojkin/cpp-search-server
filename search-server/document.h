@@ -1,5 +1,10 @@
 #pragma once
 
+#include <string>
+#include <iostream>
+
+using namespace std::string_literals;
+
 //Храним документ
 struct Document {
     Document();
@@ -18,3 +23,6 @@ enum class DocumentStatus {
     BANNED,
     REMOVED,
 };
+
+
+std::ostream& operator<<(std::ostream& out, Document document);
