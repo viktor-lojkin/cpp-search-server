@@ -99,17 +99,13 @@ void SearchServer::RemoveDocument(int document_id) {
     }
 
     documents_.erase(document_id);
-    document_to_word_freqs_.erase(document_id);
     ids_.erase(document_id);
 
-    for (auto& [word, id] : word_to_document_freqs_) {
-        if (word_to_document_freqs_.at(word).count(document_id)) {
-            word_to_document_freqs_.at(word).erase(document_id);
-        }
-        else {
-            continue;
-        }
+    for (auto& [word, tf] : document_to_word_freqs_.at(document_id)) {
+        word_to_document_freqs_.at(word).erase(document_id);
     }
+
+    document_to_word_freqs_.erase(document_id);
 }
 
 // Проверка - "это стоп-слово?"
