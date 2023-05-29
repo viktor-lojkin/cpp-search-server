@@ -9,11 +9,7 @@ class IteratorRange {
 public:
     IteratorRange(Iterator begin, Iterator end) :
         begin_(begin), end_(end) {}
-    /*
-        Iterator begin() const;
-        Iterator end() const;
-        int size() const;
-    */
+    
     Iterator begin() const {
         return begin_;
     }

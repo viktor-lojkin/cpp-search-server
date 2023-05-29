@@ -1,54 +1,103 @@
 #include <algorithm>
-#include <cmath>
-#include <numeric>
 #include <cstdlib>
-#include <iomanip>
-#include <stdexcept>
+#include <future>
+#include <map>
+#include <numeric>
+#include <random>
+#include <string>
+#include <vector>
+#include <mutex>
 
-#include "read_input_functions.h"
-#include "string_processing.h"
-#include "document.h"
-#include "search_server.h"
-#include "paginator.h"
-#include "request_queue.h"
 #include "log_duration.h"
-#include "remove_duplicates.h"
-
+#include "test_framework.h"
+#include "search_server.h"
+#include "process_queries.h"
 
 using namespace std;
 
+void RunConcurrentUpdates(ConcurrentMap<int, int>& cm, size_t thread_count, int key_count) {
+    auto kernel = [&cm, key_count](int seed) {
+        vector<int> updates(key_count);
+        iota(begin(updates), end(updates), -key_count / 2);
+        shuffle(begin(updates), end(updates), mt19937(seed));
+
+        for (int i = 0; i < 2; ++i) {
+            for (auto key : updates) {
+                ++cm[key].ref_to_value;
+            }
+        }
+    };
+
+    vector<future<void>> futures;
+    for (size_t i = 0; i < thread_count; ++i) {
+        futures.push_back(async(kernel, i));
+    }
+}
+
+void TestConcurrentUpdate() {
+    constexpr size_t THREAD_COUNT = 3;
+    constexpr size_t KEY_COUNT = 50000;
+
+    ConcurrentMap<int, int> cm(THREAD_COUNT);
+    RunConcurrentUpdates(cm, THREAD_COUNT, KEY_COUNT);
+
+    const auto result = cm.BuildOrdinaryMap();
+    ASSERT_EQUAL(result.size(), KEY_COUNT);
+    for (auto& [k, v] : result) {
+        AssertEqual(v, 6, "Key = " + to_string(k));
+    }
+}
+
+void TestReadAndWrite() {
+    ConcurrentMap<size_t, string> cm(5);
+
+    auto updater = [&cm] {
+        for (size_t i = 0; i < 50000; ++i) {
+            cm[i].ref_to_value.push_back('a');
+        }
+    };
+    auto reader = [&cm] {
+        vector<string> result(50000);
+        for (size_t i = 0; i < result.size(); ++i) {
+            result[i] = cm[i].ref_to_value;
+        }
+        return result;
+    };
+
+    auto u1 = async(updater);
+    auto r1 = async(reader);
+    auto u2 = async(updater);
+    auto r2 = async(reader);
+
+    u1.get();
+    u2.get();
+
+    for (auto f : { &r1, &r2 }) {
+        auto result = f->get();
+        ASSERT(all_of(result.begin(), result.end(), [](const string& s) {
+            return s.empty() || s == "a" || s == "aa";
+            }));
+    }
+}
+
+void TestSpeedup() {
+    {
+        ConcurrentMap<int, int> single_lock(1);
+
+        LOG_DURATION("Single lock");
+        RunConcurrentUpdates(single_lock, 4, 50000);
+    }
+    {
+        ConcurrentMap<int, int> many_locks(100);
+
+        LOG_DURATION("100 locks");
+        RunConcurrentUpdates(many_locks, 4, 50000);
+    }
+}
 
 int main() {
-
-    SearchServer search_server("and with"s);
-
-    search_server.AddDocument(1, "funny pet and nasty rat"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
-    search_server.AddDocument(2, "funny pet with curly hair"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // дубликат документа 2, будет удалён
-    search_server.AddDocument(3, "funny pet with curly hair"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // отличие только в стоп-словах, считаем дубликатом
-    search_server.AddDocument(4, "funny pet and curly hair"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // множество слов такое же, считаем дубликатом документа 1
-    search_server.AddDocument(5, "funny funny pet and nasty nasty rat"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // добавились новые слова, дубликатом не является
-    search_server.AddDocument(6, "funny pet and not very nasty rat"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // множество слов такое же, как в id 6, несмотря на другой порядок, считаем дубликатом
-    search_server.AddDocument(7, "very nasty rat and not very funny pet"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // есть не все слова, не является дубликатом
-    search_server.AddDocument(8, "pet with rat and rat and rat"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    // слова из разных документов, не является дубликатом
-    search_server.AddDocument(9, "nasty rat with curly hair"s, DocumentStatus::ACTUAL, { 1, 2 });
-
-    cout << "Before duplicates removed: "s << search_server.GetDocumentCount() << endl;
-    RemoveDuplicates(search_server);
-    cout << "After duplicates removed: "s << search_server.GetDocumentCount() << endl;
-
-    return 0;
+    TestRunner tr;
+    RUN_TEST(tr, TestConcurrentUpdate);
+    RUN_TEST(tr, TestReadAndWrite);
+    RUN_TEST(tr, TestSpeedup);
 }
