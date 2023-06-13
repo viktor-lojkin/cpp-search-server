@@ -26,6 +26,8 @@ using namespace std::string_literals;
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
 //ƒопустима€ погрешнось по релевантности
 const double EPSILON = 1e-6;
+// оличество корзинок дл€ ConcurrentMap
+const size_t BUCKETS = 100;
 
 class SearchServer {
 
@@ -198,7 +200,7 @@ std::vector<Document> SearchServer::FindAllDocuments(const std::execution::paral
     // онечный вектор с отобранными документами
     std::vector<Document> matched_documents;
     //<id, relevance> (relevance = sum(tf * idf))
-    ConcurrentMap<int, double> document_to_relevance_par(100);
+    ConcurrentMap<int, double> document_to_relevance_par(BUCKETS);
 
     std::for_each(
         std::execution::par,
@@ -272,26 +274,7 @@ std::vector<Document> SearchServer::FindTopDocuments(const ExecutionPolicy& poli
 
 template <typename Predicate>
 std::vector<Document> SearchServer::FindTopDocuments(std::string_view raw_query, Predicate predicate) const {
-    //“еперь валидность поискового запроса провер€етс€ внутри ParseQuery (ParseQueryWord)
-    const Query query = ParseQuerySeq(raw_query);
-    auto matched_documents = FindAllDocuments(query, predicate);
-    //—ортировка по невозрастанию ...
-    std::sort(matched_documents.begin(), matched_documents.end(),
-        [](const Document& lhs, const Document& rhs) {
-            //... рейтинга, если релевантность одинакова€
-            if (std::abs(lhs.relevance - rhs.relevance) < EPSILON) {
-                return lhs.rating > rhs.rating;
-            }
-            //... релевантности
-            else {
-                return lhs.relevance > rhs.relevance;
-            }
-        });
-
-    if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
-        matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
-    }
-    return matched_documents;
+    return FindTopDocuments(std::execution::seq, raw_query, predicate);
 }
 
 template <typename ExecutionPolicy>
@@ -311,7 +294,7 @@ std::vector<Document> SearchServer::FindTopDocuments(const ExecutionPolicy& poli
 }
 
 
-template <class ExecutionPolicy>
+template <typename ExecutionPolicy>
 void SearchServer::RemoveDocument(ExecutionPolicy&& policy, int document_id) {
     if (!ids_.count(document_id)) {
         return;

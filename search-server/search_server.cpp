@@ -142,19 +142,19 @@ SearchServer::QueryWord SearchServer::ParseQueryWord(std::string_view word) cons
 // Парсинг строки запроса
 SearchServer::Query SearchServer::ParseQuerySeq(std::string_view text) const {
 
+    std::vector<std::string_view> words = SplitIntoWords(text);
     Query query;
 
-    for (std::string_view word : SplitIntoWords(text)) {
-        const QueryWord query_word = ParseQueryWord(word);
-        if (!query_word.is_stop) {
-            if (query_word.is_minus) {
-                query.minus_words.push_back(query_word.word);
-            }
-            else {
-                query.plus_words.push_back(query_word.word);
+    std::for_each(
+        words.begin(), words.end(),
+        [this, &query](auto& word) {
+            const QueryWord query_word = ParseQueryWord(word);
+            if (!query_word.is_stop) {
+                query_word.is_minus ? query.minus_words.push_back(query_word.word)
+                    : query.plus_words.push_back(query_word.word);
             }
         }
-    }
+    );
 
     std::sort(query.minus_words.begin(), query.minus_words.end());
     std::sort(query.plus_words.begin(), query.plus_words.end());
@@ -237,7 +237,6 @@ std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDoc
 
     if (
         std::any_of(
-            //std::execution::par,
             query.minus_words.begin(), query.minus_words.end(),
             [&](auto& minus_word) {
                 return document_to_word_freqs_.at(document_id).count(minus_word);
